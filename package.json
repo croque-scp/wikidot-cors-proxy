@@ -1,0 +1,22 @@
+{
+  "name": "wikidot-cors-proxy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.20",
+    "@vitest/runner": "^4.1.9",
+    "prettier": "^3.7.4",
+    "vitest": "^4.1.9",
+    "wrangler": "^4.54.0"
+  },
+  "volta": {
+    "node": "24.12.0"
+  }
+}
