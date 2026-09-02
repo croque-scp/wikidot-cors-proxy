@@ -36,21 +36,57 @@ function documentation(origin) {
   return (
     `
 ${host}
-CORS + caching proxy for *.wikidot.com and *.wdfiles.com
+Magic proxy for *.wikidot.com and *.wdfiles.com
 
-Fetch Wikidot pages and files from browser JavaScript (normally blocked by
-CORS), with caching to ease the load on Wikidot.
+This proxy can:
+* Let you use uploaded HTML files in iframes directly
+* Fetch Wikidot pages/files from browser JavaScript (and bypass CORS)
 
-Supports read-only operations (GET) on public resources only.
+Supports read-only operations (GET) on public resources only. Requests are
+cached for 1 hour by default to help ease the load on Wikidot.
 
-You do not need to use a CORS proxy when accessing Wikidot resources by any
-means other than browser Javascript.
+Source code: https://github.com/croque-scp/wikidot-cors-proxy
 
-Usage: in browser-side fetches, pass the encoded target URL as ?url=:
 
-  ${origin}/?url=THE_ENCODED_ADDRESS
+HOW TO USE
+==========
 
-E.g. to fetch the text of a CSS code block:
+Pass the target Wikidot URL as a ?url= parameter to this proxy:
+
+  ${origin}/?url=https://my-site.wikidot.com/page-name
+
+Then use that proxied URL instead of the original URL.
+
+If the original URL contains an '&' character, you need to percent-encode it
+(e.g. use https://www.url-encode-decode.com).
+
+
+EMBEDDING UPLOADED FILES
+------------------------
+
+Wikidot blocks direct embedding (iframing) of files uploaded via the Files
+option on each page (e.g. HTML files). This proxy can bypass that restriction.
+
+First get the file's URL: open the Files at the bottom of the page, right-click
+the file's name, and Copy Link to get the file's URL.
+
+You can reference it, through the proxy, in an iframe:
+
+  [[iframe ${origin}/?url=THE_FILE_URL]]
+
+E.g.:
+
+  [[iframe ${origin}/?url=https://scp-wiki.wdfiles.com/local--files/scp-001/twine.html]]
+
+You can also go to that URL directly in the browser to view it as a webpage.
+
+
+BYPASSING CORS
+--------------
+
+In JavaScript, call fetch() on proxied Wikidot URLs.
+
+E.g. to fetch the text of a CSS code block (JavaScript):
 
   const target = "${target}";
   const proxied = "${origin}/?url=" + encodeURIComponent(target);
@@ -68,9 +104,9 @@ request with the X-Proxy-Cache header:
 
 X-Cache response header tells you if it was cached or not (HIT / MISS).
 
-Rate limit: 60 requests per 10 seconds per IP, then HTTP 429.
-
-Source code: https://github.com/croque-scp/wikidot-cors-proxy
+Rate limit: 60 requests per 10 seconds per IP, then it'll error with HTTP 429.
+If you find yourself hitting the limit, you can cache the responses in your own
+code (e.g. browser sessionStorage) to avoid repeated requests.
 `.trim() + "\n"
   );
 }
@@ -147,13 +183,17 @@ export default {
       return textResponse(documentation(url.origin), status);
     }
 
-    // Refuse document navigations (rendering proxied HTML could be a phishing vector and also just doesn't feel right)
+    // Refuse document navigations (rendering proxied HTML feels like it could be a phishing vector - unsure honestly)
     // Sec-Fetch-Dest cannot be forged by browser JS; Upgrade-Insecure-Requests is the fallback for plain HTTP that omits it
+    // Exception: wdfiles - Wikidot blocks embedding uploads (e.g. HTML, PDF), so this allows them to be iframed
+    const targetHost = target.hostname.toLowerCase();
+    const targetIsWdfiles =
+      targetHost === "wdfiles.com" || targetHost.endsWith(".wdfiles.com");
     const dest = request.headers.get("Sec-Fetch-Dest");
     const isNavigation =
       ["document", "iframe", "frame", "embed", "object"].includes(dest) ||
       (!dest && request.headers.has("Upgrade-Insecure-Requests"));
-    if (isNavigation) {
+    if (isNavigation && !targetIsWdfiles) {
       return textResponse(
         `
 dumbass this cors proxy is meant to be used in javascript
@@ -164,13 +204,33 @@ go read ${url.origin} again
       );
     }
 
-    if (env.RATE_LIMITER) {
+    // Skip the rate limit for permitted navigations (because a browser/iframe can't retry)
+    // Safe if hosted on CF Workers free plan, needs hardening otherwise
+    const skipRateLimit = isNavigation;
+
+    if (env.RATE_LIMITER && !skipRateLimit) {
       const ip = request.headers.get("CF-Connecting-IP") || "anonymous";
       const { success } = await env.RATE_LIMITER.limit({ key: ip });
       if (!success) {
-        return textResponse("Too many requests, slow down.\n", 429, {
-          "Retry-After": "10",
-        });
+        return textResponse(
+          `
+Error: HTTP 429 Too many requests
+You're fetching faster than the limit (60 requests per 10 seconds).
+
+If you're fetching the same thing repeatedly, cache it on your side so you
+don't need to hit this proxy as often.
+
+If you're fetching lots of different things, add some delay between your
+requests.
+
+Read the Retry-After header from this response and wait that many seconds
+before retrying.
+          `.trim() + "\n",
+          429,
+          {
+            "Retry-After": "10",
+          },
+        );
       }
     }
 

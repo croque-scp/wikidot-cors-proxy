@@ -28,12 +28,18 @@ function mockUpstream(body = "hello", init = {}) {
   );
 }
 
-async function run(request) {
+async function run(request, testEnv = env) {
   const ctx = createExecutionContext();
-  const response = await worker.fetch(request, env, ctx);
+  const response = await worker.fetch(request, testEnv, ctx);
   await waitOnExecutionContext(ctx);
   return response;
 }
+
+// A rate limiter that denies every request, to force the 429 path deterministically
+const denyLimiter = {
+  ...env,
+  RATE_LIMITER: { limit: async () => ({ success: false }) },
+};
 
 describe("cors-proxy", () => {
   it("answers CORS preflight", async () => {
@@ -95,7 +101,7 @@ describe("cors-proxy", () => {
   it("serves documentation at root when no url is given", async () => {
     const response = await run(new Request(`${PROXY}/`));
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("CORS + caching proxy");
+    expect(await response.text()).toContain("Magic proxy");
   });
 
   it("allows wdfiles.com targets", async () => {
@@ -132,6 +138,66 @@ describe("cors-proxy", () => {
       }),
     );
     expect(response.status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("allows iframe embedding of wdfiles targets", async () => {
+    const fetchSpy = mockUpstream("<html>uploaded</html>");
+    const response = await run(
+      new Request(
+        `${PROXY}/?url=${encodeURIComponent("https://scp-wiki.wdfiles.com/local--files/scp-173/embed.html")}`,
+        { headers: { "Sec-Fetch-Dest": "iframe" } },
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<html>uploaded</html>");
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it("allows top-level document navigation to wdfiles targets", async () => {
+    const fetchSpy = mockUpstream("a pdf");
+    const response = await run(
+      new Request(
+        `${PROXY}/?url=${encodeURIComponent("https://scp-wiki.wdfiles.com/local--files/scp-173/doc.pdf")}`,
+        { headers: { "Sec-Fetch-Dest": "document" } },
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("a pdf");
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it("still refuses iframe embedding of wikidot targets", async () => {
+    const fetchSpy = mockUpstream();
+    const response = await run(
+      new Request(`${PROXY}/?url=${encodeURIComponent(TARGET)}`, {
+        headers: { "Sec-Fetch-Dest": "iframe" },
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not rate-limit wdfiles navigations (iframe embeds)", async () => {
+    mockUpstream("embed");
+    const response = await run(
+      new Request(
+        `${PROXY}/?url=${encodeURIComponent("https://scp-wiki.wdfiles.com/local--files/scp-001/twine.html")}`,
+        { headers: { "Sec-Fetch-Dest": "iframe" } },
+      ),
+      denyLimiter,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("embed");
+  });
+
+  it("still rate-limits JS fetches", async () => {
+    const fetchSpy = mockUpstream();
+    const response = await run(
+      new Request(`${PROXY}/?url=${encodeURIComponent(TARGET)}`),
+      denyLimiter,
+    );
+    expect(response.status).toBe(429);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -174,7 +240,7 @@ describe("cors-proxy", () => {
       new Request(`${PROXY}/`, { headers: { "Sec-Fetch-Dest": "document" } }),
     );
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("CORS + caching proxy");
+    expect(await response.text()).toContain("Magic proxy");
   });
 
   it("serves a second request from cache", async () => {
