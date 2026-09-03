@@ -286,6 +286,8 @@ before retrying.
     const headers = new Headers(originResponse.headers);
     headers.delete("Set-Cookie");
     headers.delete("Cache-Control");
+    headers.delete("X-Frame-Options"); // blocks embedding
+    headers.delete("Content-Disposition"); // would force a download
     for (const [key, value] of Object.entries(corsHeaders())) {
       headers.set(key, value);
     }

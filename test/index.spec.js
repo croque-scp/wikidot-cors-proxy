@@ -68,6 +68,36 @@ describe("cors-proxy", () => {
     expect(response.headers.get("X-Proxy-Origin-Cache-Control")).toBeNull();
   });
 
+  it("strips X-Frame-Options so proxied files can be embedded", async () => {
+    mockUpstream("a file", { headers: { "X-Frame-Options": "SAMEORIGIN" } });
+    const response = await run(
+      new Request(`${PROXY}/?url=${encodeURIComponent(TARGET + "?xfo")}`),
+    );
+    expect(response.headers.get("X-Frame-Options")).toBeNull();
+  });
+
+  it("strips Content-Disposition so files are never forced to download", async () => {
+    mockUpstream("a pdf", {
+      headers: { "Content-Disposition": 'attachment; filename="x.pdf"' },
+    });
+    const response = await run(
+      new Request(`${PROXY}/?url=${encodeURIComponent(TARGET + "?cd")}`),
+    );
+    expect(response.headers.get("Content-Disposition")).toBeNull();
+  });
+
+  it("preserves the origin's Content-Security-Policy (we only strip framing/download blockers)", async () => {
+    mockUpstream("a page", {
+      headers: { "Content-Security-Policy": "default-src 'self'" },
+    });
+    const response = await run(
+      new Request(`${PROXY}/?url=${encodeURIComponent(TARGET + "?csp")}`),
+    );
+    expect(response.headers.get("Content-Security-Policy")).toBe(
+      "default-src 'self'",
+    );
+  });
+
   it("mirrors the origin's Cache-Control to the client", async () => {
     mockUpstream("cached asset", {
       headers: { "Cache-Control": "max-age=600" },
