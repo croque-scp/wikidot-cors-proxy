@@ -208,6 +208,18 @@ describe("cors-proxy", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("allows embedding wikidot.com file URLs (they redirect to wdfiles)", async () => {
+    mockUpstream("<h1>file</h1>");
+    const response = await run(
+      new Request(
+        `${PROXY}/?url=${encodeURIComponent("https://scp-wiki.wikidot.com/local--files/scp-001/embed.html")}`,
+        { headers: { "Sec-Fetch-Dest": "iframe" } },
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<h1>file</h1>");
+  });
+
   it("does not rate-limit wdfiles navigations (iframe embeds)", async () => {
     mockUpstream("embed");
     const response = await run(

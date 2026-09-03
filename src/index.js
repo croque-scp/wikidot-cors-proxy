@@ -185,15 +185,13 @@ export default {
 
     // Refuse document navigations (rendering proxied HTML feels like it could be a phishing vector - unsure honestly)
     // Sec-Fetch-Dest cannot be forged by browser JS; Upgrade-Insecure-Requests is the fallback for plain HTTP that omits it
-    // Exception: wdfiles - Wikidot blocks embedding uploads (e.g. HTML, PDF), so this allows them to be iframed
-    const targetHost = target.hostname.toLowerCase();
-    const targetIsWdfiles =
-      targetHost === "wdfiles.com" || targetHost.endsWith(".wdfiles.com");
+    // Exception: uploaded files (/local--files/, either host) - Wikidot blocks embedding them, which this bypasses
+    const isFile = target.pathname.startsWith("/local--files/");
     const dest = request.headers.get("Sec-Fetch-Dest");
     const isNavigation =
       ["document", "iframe", "frame", "embed", "object"].includes(dest) ||
       (!dest && request.headers.has("Upgrade-Insecure-Requests"));
-    if (isNavigation && !targetIsWdfiles) {
+    if (isNavigation && !isFile) {
       return textResponse(
         `
 dumbass this cors proxy is meant to be used in javascript
